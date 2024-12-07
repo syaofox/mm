@@ -12,31 +12,121 @@ async function startDownloading() {
   // 获取当前域名
   const hostname = window.location.hostname;
   
-  // 根据域名配置不同网站的选择器
-  const selectors = {
+  // 根据域名配置不同网站的选择器和下载策略
+  const siteConfigs = {
     'www.imagefap.com': {
-      image: '#slideshow > center > div.image-wrapper > span > img',
-      nextButton: '#controls > div > a.next'
+      selectors: {
+        image: '#slideshow > center > div.image-wrapper > span > img',
+        nextButton: '#controls > div > a.next'
+      },
+      downloadStrategy: 'singleImagePaging',
+      options: {
+        waitForImageTimeout: 10000,
+        waitForPageChangeTimeout: 15000,
+        delayBetweenDownloads: 500
+      }
     },
     'example2.com': {
-      image: '.main-image img',
-      nextButton: '.next-button'
+      selectors: {
+        imageContainer: '.gallery-container',
+        images: '.gallery-container img',
+        loadMoreButton: '.load-more'
+      },
+      downloadStrategy: 'multipleImagesScroll',
+      options: {
+        batchSize: 10,
+        scrollDelay: 1000
+      }
     },
-    // 默认选择器
+    // 默认配置
     default: {
-      image: '#slideshow > center > div.image-wrapper > span > img',
-      nextButton: '#controls > div > a.next'
+      selectors: {
+        image: '#slideshow > center > div.image-wrapper > span > img',
+        nextButton: '#controls > div > a.next'
+      },
+      downloadStrategy: 'singleImagePaging',
+      options: {
+        waitForImageTimeout: 10000,
+        waitForPageChangeTimeout: 15000,
+        delayBetweenDownloads: 500
+      }
     }
   };
 
-  // 获取当前网站的选择器配置
-  const currentSelectors = selectors[hostname] || selectors.default;
+  // 下载策略实现
+  const downloadStrategies = {
+    // 单图翻页模式
+    singleImagePaging: async (config) => {
+      const { selectors, options } = config;
+      let processedUrls = new Set();
+      
+      while (true) {
+        const imgElement = await waitForImage(selectors.image, options.waitForImageTimeout);
+        if (!imgElement) {
+          console.log('图片加载超时');
+          break;
+        }
+        
+        const imgUrl = imgElement.src;
+        if (processedUrls.has(imgUrl)) {
+          console.log('检测到重复图片，下载完成');
+          break;
+        }
+        
+        processedUrls.add(imgUrl);
+        await downloadImage(imgUrl);
+        
+        const nextButton = document.querySelector(selectors.nextButton);
+        if (!nextButton) break;
+        
+        nextButton.click();
+        
+        const pageChanged = await waitForPageChange(imgUrl, selectors.image, options.waitForPageChangeTimeout);
+        if (!pageChanged) {
+          console.log('页面切换超时');
+          break;
+        }
+        
+        await sleep(options.delayBetweenDownloads);
+      }
+    },
 
-  // 修改 waitForImage 函数使用动态选择器
-  const waitForImage = async () => {
+    // 多图滚动加载模式
+    multipleImagesScroll: async (config) => {
+      const { selectors, options } = config;
+      let processedUrls = new Set();
+      
+      while (true) {
+        const images = Array.from(document.querySelectorAll(selectors.images));
+        let newImages = images.filter(img => !processedUrls.has(img.src));
+        
+        if (newImages.length === 0) {
+          const loadMoreButton = document.querySelector(selectors.loadMoreButton);
+          if (!loadMoreButton) break;
+          
+          loadMoreButton.click();
+          await sleep(options.scrollDelay);
+          continue;
+        }
+        
+        for (const img of newImages) {
+          processedUrls.add(img.src);
+          await downloadImage(img.src);
+        }
+        
+        // 自动滚动到底部
+        window.scrollTo(0, document.body.scrollHeight);
+        await sleep(options.scrollDelay);
+      }
+    }
+  };
+
+  // 辅助函数
+  const waitForImage = async (selector, timeout) => {
     let attempts = 0;
-    while (attempts < 20) {
-      const imgElement = document.querySelector(currentSelectors.image);
+    const maxAttempts = timeout / 500;
+    while (attempts < maxAttempts) {
+      const imgElement = document.querySelector(selector);
       if (imgElement && imgElement.complete && imgElement.naturalHeight !== 0) {
         return imgElement;
       }
@@ -46,12 +136,11 @@ async function startDownloading() {
     return null;
   };
 
-  // 修改 waitForPageChange 函数使用动态选择器
-  const waitForPageChange = async (currentUrl) => {
+  const waitForPageChange = async (currentUrl, imageSelector, timeout) => {
     return new Promise((resolve) => {
       let timeoutId;
       const observer = new MutationObserver(async (mutations) => {
-        const imgElement = document.querySelector(currentSelectors.image);
+        const imgElement = document.querySelector(imageSelector);
         if (imgElement && imgElement.src !== currentUrl) {
           observer.disconnect();
           clearTimeout(timeoutId);
@@ -69,56 +158,24 @@ async function startDownloading() {
       timeoutId = setTimeout(() => {
         observer.disconnect();
         resolve(false);
-      }, 15000);
+      }, timeout);
     });
   };
 
-  // 获取并清理文件夹名称
-  let folderName = document.title.replace(/[\\/:*?"<>|]/g, '_').trim();
-  if (!folderName) folderName = 'downloaded_images';
-  
-  let processedUrls = new Set();
-  let index = 1;
-  
-  while (true) {
-    // 等待图片完全加载
-    const imgElement = await waitForImage();
-    if (!imgElement) {
-      console.log('图片加载超时');
-      break;
-    }
-    
-    const imgUrl = imgElement.src;
-    if (processedUrls.has(imgUrl)) {
-      console.log('检测到重复图片，下载完成');
-      break;
-    }
-    
-    processedUrls.add(imgUrl);
-    
-    // 从URL中提取文件名
+  const downloadImage = async (imgUrl) => {
+    const folderName = document.title.replace(/[\\/:*?"<>|]/g, '_').trim() || 'downloaded_images';
     const originalFileName = imgUrl.split('/').pop().split('?')[0];
     
-    // 发送下载请求到background script
     chrome.runtime.sendMessage({
       type: 'downloadImage',
       url: imgUrl,
       filename: `${folderName}/${originalFileName}`
     });
-    
-    // 修改下一页按钮选择器
-    const nextButton = document.querySelector(currentSelectors.nextButton);
-    if (!nextButton) break;
-    
-    nextButton.click();
-    
-    // 等待页面内容变化
-    const pageChanged = await waitForPageChange(imgUrl);
-    if (!pageChanged) {
-      console.log('页面切换超时');
-      break;
-    }
-    
-    index++;
-  }
+  };
+
+  // 获取当前网站的配置
+  const currentConfig = siteConfigs[hostname] || siteConfigs.default;
+  
+  // 执行对应的下载策略
+  await downloadStrategies[currentConfig.downloadStrategy](currentConfig);
 } 
