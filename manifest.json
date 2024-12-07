@@ -1,0 +1,17 @@
+{
+  "manifest_version": 3,
+  "name": "图片系列下载器",
+  "version": "1.0",
+  "description": "下载网页中的图片系列",
+  "permissions": [
+    "downloads",
+    "activeTab",
+    "scripting"
+  ],
+  "action": {
+    "default_popup": "popup.html"
+  },
+  "background": {
+    "service_worker": "background.js"
+  }
+} 
