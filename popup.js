@@ -9,6 +9,49 @@ document.getElementById('startDownload').addEventListener('click', async () => {
 async function startDownloading() {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   
+  // 等待图片加载完成的函数
+  const waitForImage = async () => {
+    let attempts = 0;
+    while (attempts < 20) {
+      const imgElement = document.querySelector('#slideshow > center > div.image-wrapper > span > img');
+      if (imgElement && imgElement.complete && imgElement.naturalHeight !== 0) {
+        return imgElement;
+      }
+      await sleep(500);
+      attempts++;
+    }
+    return null;
+  };
+
+  // 等待页面变化的函数
+  const waitForPageChange = async (currentUrl) => {
+    return new Promise((resolve) => {
+      let timeoutId;
+      const observer = new MutationObserver(async (mutations) => {
+        const imgElement = document.querySelector('#slideshow > center > div.image-wrapper > span > img');
+        if (imgElement && imgElement.src !== currentUrl) {
+          observer.disconnect();
+          clearTimeout(timeoutId);
+          // 确保新图片已完全加载
+          await sleep(500);
+          resolve(true);
+        }
+      });
+
+      observer.observe(document.body, {
+        childList: true,
+        subtree: true,
+        attributes: true
+      });
+
+      // 设置超时保护，15秒后自动结束
+      timeoutId = setTimeout(() => {
+        observer.disconnect();
+        resolve(false);
+      }, 15000);
+    });
+  };
+
   // 获取并清理文件夹名称
   let folderName = document.title.replace(/[\\/:*?"<>|]/g, '_').trim();
   if (!folderName) folderName = 'downloaded_images';
@@ -17,9 +60,12 @@ async function startDownloading() {
   let index = 1;
   
   while (true) {
-    // 获取当前图片
-    const imgElement = document.querySelector('#slideshow > center > div.image-wrapper > span > img');
-    if (!imgElement) break;
+    // 等待图片完全加载
+    const imgElement = await waitForImage();
+    if (!imgElement) {
+      console.log('图片加载超时');
+      break;
+    }
     
     const imgUrl = imgElement.src;
     if (processedUrls.has(imgUrl)) {
@@ -44,9 +90,14 @@ async function startDownloading() {
     if (!nextButton) break;
     
     nextButton.click();
-    index++;
     
-    // 等待页面加载
-    await sleep(1000);
+    // 等待页面内容变化
+    const pageChanged = await waitForPageChange(imgUrl);
+    if (!pageChanged) {
+      console.log('页面切换超时');
+      break;
+    }
+    
+    index++;
   }
 } 
