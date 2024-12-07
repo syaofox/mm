@@ -123,6 +123,37 @@ async function startDownloading() {
       await sleep(1000);
       updateProgress('开始加载图片...');
       
+      // 添加一个新的辅助函数来等待新内容加载
+      const waitForNewContent = async (lastImageCount, selectors,timeout = 10000) => {
+        return new Promise((resolve) => {
+          let startTime = Date.now();
+          let observer = new MutationObserver(async (mutations) => {
+            // 获取当前图片数量
+            const currentImageCount = document.querySelectorAll(selectors.images).length;
+            
+            // 检查是否有新图片加载
+            if (currentImageCount > lastImageCount) {
+              observer.disconnect();
+              // 等待图片完全加载
+              await sleep(500);
+              resolve(true);
+            }
+            
+            // 检查是否超时
+            if (Date.now() - startTime > timeout) {
+              observer.disconnect();
+              resolve(false);
+            }
+          });
+          
+          observer.observe(document.body, {
+            childList: true,
+            subtree: true,
+            attributes: true
+          });
+        });
+      };
+      
       while (true) {
         // 检查当前可见区域内的加载中图片
         const loadingImages = Array.from(document.querySelectorAll(selectors.loadingImage))
@@ -164,16 +195,16 @@ async function startDownloading() {
           
           // 如果按钮不在视图中或者只露出一部分，调整滚动位置
           if (buttonRect.bottom > window.innerHeight || buttonRect.top < 0) {
-            // 滚动到按钮上方一点的位置，确保按钮完全可见
             const scrollToY = window.pageYOffset + buttonRect.top - 100;
             window.scrollTo(0, scrollToY);
-            await sleep(500);
-            
-            // 重新获取按钮，因为滚动可能触发了页面更新
+            await sleep(200);
             loadMoreButton = document.querySelector(selectors.loadMoreButton);
           }
           
           if (loadMoreButton) {
+            // 记录点击前的图片数量
+            const beforeClickImageCount = document.querySelectorAll(selectors.images).length;
+            
             loadMoreButton.click();
             updateProgress('点击加载更多...');
             
@@ -191,7 +222,12 @@ async function startDownloading() {
             }
             
             // 等待新内容加载
-            await sleep(1000);
+            const newContentLoaded = await waitForNewContent(beforeClickImageCount, selectors);
+            if (!newContentLoaded) {
+              updateProgress('未检测到新内容加载');
+              break;
+            }
+            
             continue;
           }
         }
