@@ -9,11 +9,34 @@ document.getElementById('startDownload').addEventListener('click', async () => {
 async function startDownloading() {
   const sleep = ms => new Promise(resolve => setTimeout(resolve, ms));
   
-  // 等待图片加载完成的函数
+  // 获取当前域名
+  const hostname = window.location.hostname;
+  
+  // 根据域名配置不同网站的选择器
+  const selectors = {
+    'www.imagefap.com': {
+      image: '#slideshow > center > div.image-wrapper > span > img',
+      nextButton: '#controls > div > a.next'
+    },
+    'example2.com': {
+      image: '.main-image img',
+      nextButton: '.next-button'
+    },
+    // 默认选择器
+    default: {
+      image: '#slideshow > center > div.image-wrapper > span > img',
+      nextButton: '#controls > div > a.next'
+    }
+  };
+
+  // 获取当前网站的选择器配置
+  const currentSelectors = selectors[hostname] || selectors.default;
+
+  // 修改 waitForImage 函数使用动态选择器
   const waitForImage = async () => {
     let attempts = 0;
     while (attempts < 20) {
-      const imgElement = document.querySelector('#slideshow > center > div.image-wrapper > span > img');
+      const imgElement = document.querySelector(currentSelectors.image);
       if (imgElement && imgElement.complete && imgElement.naturalHeight !== 0) {
         return imgElement;
       }
@@ -23,16 +46,15 @@ async function startDownloading() {
     return null;
   };
 
-  // 等待页面变化的函数
+  // 修改 waitForPageChange 函数使用动态选择器
   const waitForPageChange = async (currentUrl) => {
     return new Promise((resolve) => {
       let timeoutId;
       const observer = new MutationObserver(async (mutations) => {
-        const imgElement = document.querySelector('#slideshow > center > div.image-wrapper > span > img');
+        const imgElement = document.querySelector(currentSelectors.image);
         if (imgElement && imgElement.src !== currentUrl) {
           observer.disconnect();
           clearTimeout(timeoutId);
-          // 确保新图片已完全加载
           await sleep(500);
           resolve(true);
         }
@@ -44,7 +66,6 @@ async function startDownloading() {
         attributes: true
       });
 
-      // 设置超时保护，15秒后自动结束
       timeoutId = setTimeout(() => {
         observer.disconnect();
         resolve(false);
@@ -85,8 +106,8 @@ async function startDownloading() {
       filename: `${folderName}/${originalFileName}`
     });
     
-    // 点击下一页
-    const nextButton = document.querySelector('#controls > div > a.next');
+    // 修改下一页按钮选择器
+    const nextButton = document.querySelector(currentSelectors.nextButton);
     if (!nextButton) break;
     
     nextButton.click();
