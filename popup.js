@@ -21,9 +21,9 @@ async function startDownloading() {
       },
       downloadStrategy: 'singleImagePaging',
       options: {
-        waitForImageTimeout: 10000,
+        waitForImageTimeout: 15000,
         waitForPageChangeTimeout: 15000,
-        delayBetweenDownloads: 500
+        delayBetweenDownloads: 200
       }
     },
     'xx.knit.bid': {
